@@ -1,4 +1,7 @@
-# Vulkan tutorial
+# Extended Vulkan tutorial
+
+**The content of this branch builds upon the work we did in the tutorial
+by adding new features and possibly heavy refactoring.**
 
 Vulkan [tutorials][0] written in Rust using [Ash][1].
 
@@ -302,6 +305,14 @@ Generate mipmaps for the model texture and update the sampler to make use of the
 Add multisampling anti-aliasing.
 
 ![The end result](screenshots/end.png)
+
+### 9: A bit of refactoring, just a bit...
+
+Until now the program is mostly contained in a gigantic source file. Let's split that 
+up a bit to make the program more readable and easily modifiable. 
+
+First we add a `vulkan` module containing convenient wrappers around the vulkan types.
+Then we move the `create_...` methods into the proper namespace.
 
 ## Run it
 

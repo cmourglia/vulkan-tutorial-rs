@@ -26,7 +26,9 @@ impl Camera {
     }
 
     pub fn forward(&mut self, r: f32) {
-        self.r -= r;
+        if (self.r - r).abs() > 1.0 {
+            self.r -= r;
+        }
     }
 }
 
