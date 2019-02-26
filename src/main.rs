@@ -2,6 +2,7 @@ mod camera;
 mod math;
 mod mesh;
 mod object;
+mod util;
 mod vulkan;
 
 use crate::{camera::*, mesh::*, object::*, vulkan::*};
@@ -601,7 +602,7 @@ impl VulkanApp {
                 let buffer_info = vk::DescriptorBufferInfo::builder()
                     .buffer(buffer.buffer)
                     .offset(0)
-                    .range(size_of::<UniformBufferObject>() as vk::DeviceSize)
+                    .range(size_of::<CameraUBO>() as vk::DeviceSize)
                     .build();
                 let buffer_infos = [buffer_info];
 
@@ -747,9 +748,14 @@ impl VulkanApp {
 
         let layout = {
             let layouts = [descriptor_set_layout];
+            let push_constant_ranges = vk::PushConstantRange {
+                stage_flags: vk::ShaderStageFlags::VERTEX,
+                offset: 0,
+                size: size_of::<Matrix4<f32>>() as _,
+            };
             let layout_info = vk::PipelineLayoutCreateInfo::builder()
                 .set_layouts(&layouts)
-                // .push_constant_ranges
+                .push_constant_ranges(&[push_constant_ranges])
                 .build();
 
             unsafe { device.create_pipeline_layout(&layout_info, None).unwrap() }
@@ -1073,7 +1079,7 @@ impl VulkanApp {
     }
 
     fn create_uniform_buffers(context: &Rc<VkContext>, count: usize) -> Vec<Buffer> {
-        let size = size_of::<UniformBufferObject>() as vk::DeviceSize;
+        let size = size_of::<CameraUBO>() as vk::DeviceSize;
         let mut buffers = Vec::new();
 
         for _ in 0..count {
@@ -1207,6 +1213,18 @@ impl VulkanApp {
                 0,
                 &[object.descriptor_sets(index)],
                 &[],
+            )
+        };
+
+        // Push constants
+        unsafe {
+            let transform = object.transform();
+            device.cmd_push_constants(
+                buffer,
+                pipeline_layout,
+                vk::ShaderStageFlags::VERTEX,
+                0,
+                util::any_as_u8_slice(&transform),
             )
         };
 
@@ -1537,12 +1555,11 @@ impl VulkanApp {
         let proj = math::perspective(Deg(45.0), aspect, 0.1, 10.0);
 
         self.objects.iter().for_each(|obj| {
-            let model = obj.transform();
-            let ubo = UniformBufferObject { model, view, proj };
+            let ubo = CameraUBO::new(view, proj);
             let ubos = [ubo];
 
             let buffer_mem = obj.uniforms(current_image as usize).memory;
-            let size = size_of::<UniformBufferObject>() as vk::DeviceSize;
+            let size = size_of::<CameraUBO>() as vk::DeviceSize;
             unsafe {
                 let device = self.context.device();
                 let data_ptr = device
@@ -1654,14 +1671,6 @@ impl Vertex {
             .build();
         [position_desc, color_desc, coords_desc]
     }
-}
-
-#[derive(Clone, Copy)]
-#[allow(dead_code)]
-struct UniformBufferObject {
-    model: Matrix4<f32>,
-    view: Matrix4<f32>,
-    proj: Matrix4<f32>,
 }
 
 fn main() {

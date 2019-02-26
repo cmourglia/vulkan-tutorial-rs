@@ -1,5 +1,5 @@
 use crate::math::clamp;
-use cgmath::Point3;
+use cgmath::{Matrix4, Point3};
 
 #[derive(Clone, Copy)]
 pub struct Camera {
@@ -39,5 +39,18 @@ impl Default for Camera {
             phi: 45.0_f32.to_radians(),
             r: 3.0,
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub struct CameraUBO {
+    view: Matrix4<f32>,
+    proj: Matrix4<f32>,
+}
+
+impl CameraUBO {
+    pub fn new(view: Matrix4<f32>, proj: Matrix4<f32>) -> Self {
+        Self { view, proj }
     }
 }

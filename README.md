@@ -1,7 +1,9 @@
 # Extended Vulkan tutorial
 
 **The content of this branch builds upon the work we did in the tutorial
-by adding new features and possibly heavy refactoring.**
+by adding new features and possibly heavy refactoring. This part could
+probably contain some errors if I say anything silly or my english is just 
+bad please tell me !**
 
 Vulkan [tutorials][0] written in Rust using [Ash][1].
 
@@ -331,6 +333,34 @@ the same uniform buffer which is probably not a good idea. We'll leave it as is 
 and come back to it in a chapter about push constants.
 
 ![Adding a new chalet](screenshots/two_chalet.png)
+
+### 11: Push constants
+
+Until now we have been passing data to the shaders using uniform buffers and samplers. We can also
+use push constants. Push constants are data which is sent with the command buffer. The maximum size
+for push contants is very limited but should be at least 128 bytes to be complient with Vulkan specs.
+You can check the maximum size supported by your hardware with `VkPhysicalDeviceLimits::maxPushConstantsSize`.
+
+We will use push constants to pass the model transformation matrix to the vertex shader. Since our 
+geometry is static we won't need to update the push constant so we're going to push them alongside
+our main command buffer.
+
+First you'll need to update the `create_pipeline` method and modify the pipeline layout creation to add
+a `VkPushConstantRange` instance. We need to specify the shader stage in which the constants will be pushed,
+an offset value and the size in bytes of the constants.
+
+Then we will need to update `register_draw_commands` to record the command to push the constants using
+`vkCmdPushConstants`.
+
+Finally, we can remove the model attribute from our `UniformBufferObject` structure. Since it now only 
+contains camera matrices we will rename it `CameraUBO` and move it into the `camera` module.
+
+We're almost done, we still need to update the vertex shader code to declare the push constant that we
+are going to use. The synthax is close to declaring a uniform buffer structure execpt we replace the 
+`binding = x` attribute with `push_constant`. Also we need to remove the model attribute from the uniform
+buffer structure.
+
+And we're done, the scene should still render the same but we now pass transformation data using push constants.
 
 ## Run it
 
