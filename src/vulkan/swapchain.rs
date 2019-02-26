@@ -223,12 +223,6 @@ impl Swapchain {
     }
 }
 
-// impl Drop for Swapchain {
-//     fn drop(&mut self) {
-//         self.destroy();
-//     }
-// }
-
 pub struct SwapchainSupportDetails {
     pub capabilities: vk::SurfaceCapabilitiesKHR,
     pub formats: Vec<vk::SurfaceFormatKHR>,

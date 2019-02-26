@@ -1,9 +1,10 @@
 mod camera;
 mod math;
 mod mesh;
+mod object;
 mod vulkan;
 
-use crate::{camera::*, mesh::*, vulkan::*};
+use crate::{camera::*, mesh::*, object::*, vulkan::*};
 use ash::{
     extensions::{
         ext::DebugReport,
@@ -50,10 +51,9 @@ struct VulkanApp {
     depth_format: vk::Format,
     depth_texture: Texture,
     swapchain: Swapchain,
-    mesh: Mesh,
-    uniform_buffers: Vec<Buffer>,
+    _mesh: Rc<Mesh>,
     descriptor_pool: vk::DescriptorPool,
-    descriptor_sets: Vec<vk::DescriptorSet>,
+    objects: Vec<Object>,
     command_buffers: Vec<vk::CommandBuffer>,
     in_flight_frames: InFlightFrames,
 }
@@ -159,27 +159,42 @@ impl VulkanApp {
             render_pass,
         );
 
-        let mesh = Self::create_mesh(&context);
-
-        let uniform_buffers = Self::create_uniform_buffers(&context, swapchain.image_count());
+        let mesh = Rc::new(Self::create_mesh(&context));
 
         let descriptor_pool =
-            Self::create_descriptor_pool(context.device(), swapchain.image_count() as _);
-        let descriptor_sets = Self::create_descriptor_sets(
-            context.device(),
-            descriptor_pool,
-            descriptor_set_layout,
-            &uniform_buffers,
-            mesh.texture(),
-        );
+            Self::create_descriptor_pool(context.device(), swapchain.image_count() as u32 * 2);
+
+        let create_obj = |position| {
+            let uniform_buffers = Self::create_uniform_buffers(&context, swapchain.image_count());
+            let descriptor_sets = Self::create_descriptor_sets(
+                context.device(),
+                descriptor_pool,
+                descriptor_set_layout,
+                &uniform_buffers,
+                mesh.texture(),
+            );
+            let transform = {
+                let rot = Matrix4::from_angle_x(Deg(270.0));
+                let trans = Matrix4::from_translation(position);
+                trans * rot
+            };
+            Object::new(
+                Rc::clone(&mesh),
+                uniform_buffers,
+                descriptor_sets,
+                transform,
+            )
+        };
+        let obj1 = create_obj(Vector3::new(-0.1, 0.0, -0.8));
+        let obj2 = create_obj(Vector3::new(0.1, 0.0, 0.8));
+        let objects = vec![obj1, obj2];
 
         let command_buffers = Self::create_and_register_command_buffers(
             &context,
             &swapchain,
             render_pass,
-            &mesh,
             layout,
-            &descriptor_sets,
+            &objects,
             pipeline,
         );
 
@@ -204,10 +219,9 @@ impl VulkanApp {
             depth_format,
             depth_texture,
             swapchain,
-            mesh,
-            uniform_buffers,
+            _mesh: mesh,
             descriptor_pool,
-            descriptor_sets,
+            objects,
             command_buffers,
             in_flight_frames,
         }
@@ -517,7 +531,12 @@ impl VulkanApp {
     }
 
     fn create_descriptor_set_layout(device: &Device) -> vk::DescriptorSetLayout {
-        let ubo_binding = UniformBufferObject::get_descriptor_set_layout_binding();
+        let ubo_binding = vk::DescriptorSetLayoutBinding::builder()
+            .binding(0)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::VERTEX)
+            .build();
         let sampler_binding = vk::DescriptorSetLayoutBinding::builder()
             .binding(1)
             .descriptor_count(1)
@@ -1074,9 +1093,8 @@ impl VulkanApp {
         context: &VkContext,
         swapchain: &Swapchain,
         render_pass: vk::RenderPass,
-        mesh: &Mesh,
         pipeline_layout: vk::PipelineLayout,
-        descriptor_sets: &[vk::DescriptorSet],
+        objects: &[Object],
         graphics_pipeline: vk::Pipeline,
     ) -> Vec<vk::CommandBuffer> {
         let allocate_info = vk::CommandBufferAllocateInfo::builder()
@@ -1144,35 +1162,9 @@ impl VulkanApp {
                 device.cmd_bind_pipeline(buffer, vk::PipelineBindPoint::GRAPHICS, graphics_pipeline)
             };
 
-            // Bind vertex buffer
-            let vertex_buffers = [mesh.vertices().buffer];
-            let offsets = [0];
-            unsafe { device.cmd_bind_vertex_buffers(buffer, 0, &vertex_buffers, &offsets) };
-
-            // Bind index buffer
-            unsafe {
-                device.cmd_bind_index_buffer(
-                    buffer,
-                    mesh.indices().buffer,
-                    0,
-                    vk::IndexType::UINT32,
-                )
-            };
-
-            // Bind descriptor set
-            unsafe {
-                device.cmd_bind_descriptor_sets(
-                    buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    pipeline_layout,
-                    0,
-                    &descriptor_sets[i..=i],
-                    &[],
-                )
-            };
-
-            // Draw
-            unsafe { device.cmd_draw_indexed(buffer, mesh.index_count() as _, 1, 0, 0, 0) };
+            objects.iter().for_each(|obj| {
+                Self::register_draw_commands(device, pipeline_layout, i, buffer, obj)
+            });
 
             // End render pass
             unsafe { device.cmd_end_render_pass(buffer) };
@@ -1182,6 +1174,44 @@ impl VulkanApp {
         });
 
         buffers
+    }
+
+    fn register_draw_commands(
+        device: &Device,
+        pipeline_layout: vk::PipelineLayout,
+        index: usize,
+        buffer: vk::CommandBuffer,
+        object: &Object,
+    ) {
+        // Bind vertex buffer
+        let vertex_buffers = [object.mesh().vertices().buffer];
+        let offsets = [0];
+        unsafe { device.cmd_bind_vertex_buffers(buffer, 0, &vertex_buffers, &offsets) };
+
+        // Bind index buffer
+        unsafe {
+            device.cmd_bind_index_buffer(
+                buffer,
+                object.mesh().indices().buffer,
+                0,
+                vk::IndexType::UINT32,
+            )
+        };
+
+        // Bind descriptor set
+        unsafe {
+            device.cmd_bind_descriptor_sets(
+                buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipeline_layout,
+                0,
+                &[object.descriptor_sets(index)],
+                &[],
+            )
+        };
+
+        // Draw
+        unsafe { device.cmd_draw_indexed(buffer, object.mesh().index_count() as _, 1, 0, 0, 0) };
     }
 
     fn create_sync_objects(device: &Device) -> InFlightFrames {
@@ -1444,9 +1474,8 @@ impl VulkanApp {
             &self.context,
             &swapchain,
             render_pass,
-            &self.mesh,
             layout,
-            &self.descriptor_sets,
+            &self.objects,
             pipeline,
         );
 
@@ -1500,28 +1529,30 @@ impl VulkanApp {
 
         let aspect = self.swapchain.properties().extent.width as f32
             / self.swapchain.properties().extent.height as f32;
-        let ubo = UniformBufferObject {
-            model: Matrix4::from_angle_x(Deg(270.0)),
-            view: Matrix4::look_at(
-                self.camera.position(),
-                Point3::new(0.0, 0.0, 0.0),
-                Vector3::new(0.0, 1.0, 0.0),
-            ),
-            proj: math::perspective(Deg(45.0), aspect, 0.1, 10.0),
-        };
-        let ubos = [ubo];
+        let view = Matrix4::look_at(
+            self.camera.position(),
+            Point3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        );
+        let proj = math::perspective(Deg(45.0), aspect, 0.1, 10.0);
 
-        let buffer_mem = self.uniform_buffers[current_image as usize].memory;
-        let size = size_of::<UniformBufferObject>() as vk::DeviceSize;
-        unsafe {
-            let device = self.context.device();
-            let data_ptr = device
-                .map_memory(buffer_mem, 0, size, vk::MemoryMapFlags::empty())
-                .unwrap();
-            let mut align = ash::util::Align::new(data_ptr, align_of::<f32>() as _, size);
-            align.copy_from_slice(&ubos);
-            device.unmap_memory(buffer_mem);
-        }
+        self.objects.iter().for_each(|obj| {
+            let model = obj.transform();
+            let ubo = UniformBufferObject { model, view, proj };
+            let ubos = [ubo];
+
+            let buffer_mem = obj.uniforms(current_image as usize).memory;
+            let size = size_of::<UniformBufferObject>() as vk::DeviceSize;
+            unsafe {
+                let device = self.context.device();
+                let data_ptr = device
+                    .map_memory(buffer_mem, 0, size, vk::MemoryMapFlags::empty())
+                    .unwrap();
+                let mut align = ash::util::Align::new(data_ptr, align_of::<f32>() as _, size);
+                align.copy_from_slice(&ubos);
+                device.unmap_memory(buffer_mem);
+            }
+        });
     }
 }
 
@@ -1631,18 +1662,6 @@ struct UniformBufferObject {
     model: Matrix4<f32>,
     view: Matrix4<f32>,
     proj: Matrix4<f32>,
-}
-
-impl UniformBufferObject {
-    fn get_descriptor_set_layout_binding() -> vk::DescriptorSetLayoutBinding {
-        vk::DescriptorSetLayoutBinding::builder()
-            .binding(0)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .descriptor_count(1)
-            .stage_flags(vk::ShaderStageFlags::VERTEX)
-            // .immutable_samplers() null since we're not creating a sampler descriptor
-            .build()
-    }
 }
 
 fn main() {

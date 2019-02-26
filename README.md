@@ -314,6 +314,24 @@ up a bit to make the program more readable and easily modifiable.
 First we add a `vulkan` module containing convenient wrappers around the vulkan types.
 Then we move the `create_...` methods into the proper namespace.
 
+### 10: Rendering multiple objects
+
+Here we will render the chalet multiple times. To do this we will abstract the per instance
+data in an `Object` structure that will contains a reference to the mesh to render, the uniform
+buffers and descriptor sets (We will still have on buffer and set per swapchain image). We
+will also keep transformation data in it.
+
+Then we will update the `create_and_register_command_buffers` to register instance specific 
+commands per object. Those command are the binding commands for index and vertex buffers, 
+uniform buffers and descriptor sets.
+
+We also need to update `update_uniform_buffers` to update all uniform buffers. Here we keep
+putting camera transformation data (per frame) and model transformation data (per object) in
+the same uniform buffer which is probably not a good idea. We'll leave it as is for now though
+and come back to it in a chapter about push constants.
+
+![Adding a new chalet](screenshots/two_chalet.png)
+
 ## Run it
 
 With validation layers:
